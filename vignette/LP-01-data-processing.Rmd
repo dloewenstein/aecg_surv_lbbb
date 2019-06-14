@@ -1,0 +1,162 @@
+---
+title: "Data pre-processing"
+author: "Daniel Loewenstein"
+date: '`r Sys.time()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load namespaces
+library(promise)
+library(dplyr)
+library(here)
+library(stringr)
+library(caret)
+```
+
+```{r}
+# Some convenience wrappers
+DERIVED_DATA <- function(...) here::here("analysis", "data", "derived_data", ...)
+RAW_DATA     <- function(...) here::here("analysis", "data", "raw_data", ...)
+```
+
+
+```{r load_data}
+# Load PROMISE data
+data(promiseData)
+# Study concerns left bundle branch block patients
+demo <- promiseData %>% filter(LBBB == 1)
+
+# Load aecg data
+aecg <- read.delim(RAW_DATA("EC_Exports.txt"), 
+                   na.strings = c("", "NA", "N/A"),
+                   stringsAsFactors = FALSE,
+                   header = TRUE)
+
+aecg <- rename(aecg, PatientID = "MUSE_20170517_210411_06000_0_0_cs.X.0")
+
+# Load conventional ecg data
+ecg <- read.csv(RAW_DATA("SpencerNamesIntervals.csv"),
+                na.strings = c("", "NA", "N/A"),
+                stringsAsFactors = FALSE,
+                header = TRUE)
+```
+
+```{r bind_ecg}
+# Find common vars
+vars_in_both <- intersect(names(ecg), names(aecg))[-1] # Remove PatientID
+
+fname_pattern <- "MUSE_[[:digit:]]+_[[:digit:]]+_[[:digit:]]+"
+
+# Fix PatientID
+aecg <- mutate(aecg, PatientID = str_extract(PatientID, fname_pattern))
+ecg  <- mutate(ecg,  PatientID = str_extract(PatientID, fname_pattern))
+demo <- mutate(demo, filepath  = str_extract(filepath, fname_pattern))
+
+# Want join data
+aecg <- left_join(aecg, select(ecg, -vars_in_both), by = "PatientID")
+
+aecg <- aecg %>% 
+    select(-Patient, -contains("hr.min.sec"), -starts_with("HR", ignore.case = FALSE))
+```
+
+
+```{r}
+#' Earliest endpoint date
+#'
+#' @param ... POSIXct vectors of endpoint dates
+#'
+#' @return Earliest date in POSIXct
+#'
+create_endpoint <- function(...) {
+   
+    is_POSIXct <- function(x) any(class(x) %in% c("POSIXct"))
+    
+    date_inputs <- list(...)
+    # Check for POSiXct input
+    stopifnot(
+        all(
+            vapply(date_inputs, is_POSIXct, logical(1))
+        )
+    )
+    
+    # Early return if all NA
+    if( all(vapply(date_inputs, is.na, logical(1))) ) return(NA)
+    
+    earliest_idx <- which.min(date_inputs)
+    
+    date_inputs[[earliest_idx]]
+}
+
+
+#' Create binary outcome indicator
+#'
+#' @param idx_date Start date
+#' @param endpoint Date of endpoint
+#' @param n_years Indicate outcome if endpoint within n_years
+#'
+#' @return \code{logical(1)}
+#'
+create_boutcome <- function(idx_date, endpoint, n_years) {
+    
+    # Early return if missing endoint
+    if( is.na(endpoint) ) return(FALSE)
+    
+    days_until_endpoint <- difftime(idx_date, endpoint, units = "days")
+    
+    # Use .25 to account for leap years
+    outcome <- ( days_until_endpoint / 365.25 ) <= n_years
+}
+```
+
+```{r}
+# Composite endpoint {earliest of DOD, LVAD, CRT or HTx}
+# Create cols for outcome 1 and 2 yr
+demo <- demo %>% 
+    rowwise() %>% 
+    mutate(endpoint_date = create_endpoint(DOD, LVAD.Date, CRT.Date, HTx.Date)) %>% 
+    mutate(outcome_1yr = create_boutcome(ECGDate, endpoint_date, n_years = 1),
+           outcome_2yr = create_boutcome(ECGDate, endpoint_date, n_years = 2)
+           ) %>% 
+    ungroup()
+```
+
+```{r tidy_aecg}
+# several %% in header column in raw data, causes "dots" . in col names
+names(aecg) <- str_remove(names(aecg), "\\.+$")
+
+aecg <- select(aecg, -DocumentName, -Date, -Time)
+
+# All variables not useful
+selected_vars <- read.csv(RAW_DATA("selected_vars.csv"), 
+                          stringsAsFactors = FALSE)
+
+exclude_vars <- filter(selected_vars, exclude == 1) %>% pull(var_name)
+aecg <- select(aecg, -exclude_vars)
+
+factor_var <- c(
+    "Jonas.Morph",
+    "T.Morph",
+    "QRS.Morph",
+    "P.Morph"
+)
+
+aecg <- aecg %>% 
+    mutate_at(vars(-PatientID), as.numeric) %>% 
+    mutate_at(vars(factor_var), as.factor)
+
+# Add outcome
+aecg <- left_join(aecg, 
+                  select(demo,filepath, outcome_1yr, outcome_2yr),
+                  by = c("PatientID" = "filepath")
+                  )
+```
+
+```{r}
+saveRDS(aecg, DERIVED_DATA("processed_data.rds"), version = 3)
+```
+
