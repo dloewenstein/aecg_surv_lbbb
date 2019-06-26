@@ -1,0 +1,79 @@
+---
+title: "Data model-preprocessing"
+author: "Daniel Loewenstein"
+date: '`r Sys.time()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(dplyr)
+```
+
+```{r wrappers}
+# Some convenience wrappers
+DERIVED_DATA <- function(...) here::here("analysis", "data", "derived_data", ...)
+RAW_DATA     <- function(...) here::here("analysis", "data", "raw_data", ...)
+```
+
+```{r load_data}
+aecg <- readRDS(DERIVED_DATA("processed_data.rds"))
+```
+
+```{r}
+# DeepKnockoffs handle either continous or binary data
+# Remove factor variables
+aecg <- aecg %>% 
+    select(-contains("morph"))
+```
+
+```{r}
+# Remove due to Na
+aecg_sub <- aecg[-222, ]
+aecg_sub$P.A <- NULL
+
+X <- model.matrix(outcome_1yr ~ .,
+                  data = aecg_sub %>% 
+                      selct(-contains("morph"), -outcome_2yr,-PatientID)
+                  )
+
+# Remove intercept
+X <- X[, -1]
+
+Y <- pull(aecg_sub, outcome_1yr)
+```
+
+```{r}
+saveRDS(X, DERIVED_DATA("x_train.rds"), version = 3)
+saveRDS(Y, DERIVED_DATA("y_train.rds"), version = 3)
+```
+
+
+# Hierarchical clustering
+
+```{r}
+# Compute distance between variables based on their pairwise absolute correlations
+
+# pdist <- as.dist((1-abs(sigma_hat)))
+# linkage <- hclust(pdist, method = "average")
+```
+
+```{r}
+# library(plotly)
+# 
+# plot_dendro(as.dendrogram(linkage), xmin = 0, height = 1000, width = 1000) %>% 
+#   hide_legend() %>% 
+#   highlight(persistent = FALSE, dynamic = TRUE)
+```
+
+```{r}
+# groups <- cutree(linkage, h = 0.3)
+
+```
+
+
+
