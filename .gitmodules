@@ -1,0 +1,3 @@
+[submodule "lib/deepknockoffs"]
+	path = lib/deepknockoffs
+	url = https://github.com/msesia/deepknockoffs.git
