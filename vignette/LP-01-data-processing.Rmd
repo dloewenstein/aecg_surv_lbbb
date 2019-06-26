@@ -138,17 +138,19 @@ selected_vars <- read.csv(RAW_DATA("selected_vars.csv"),
 exclude_vars <- filter(selected_vars, exclude == 1) %>% pull(var_name)
 aecg <- select(aecg, -exclude_vars)
 
-factor_var <- c(
-    "Jonas.Morph",
-    "T.Morph",
-    "QRS.Morph",
-    "P.Morph"
-)
+# Get everything to numeric since it's coded as char.
+# All "morph" columns are morphologies and hence factors,
+# some contains only one level but we want the factor
+# to be registered as with all four levels since this matters
+# when creating model matrices with dummy encoding.
 
 aecg <- aecg %>% 
     mutate_at(vars(-PatientID), as.numeric) %>% 
-    mutate_at(vars(factor_var), as.factor)
+    mutate_at(vars(contains("morph")), factor, levels = c(1, 2, 3, 4))
 
+```
+
+```{r}
 # Add outcome
 aecg <- left_join(aecg, 
                   select(demo,filepath, outcome_1yr, outcome_2yr),
