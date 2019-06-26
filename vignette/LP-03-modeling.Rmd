@@ -1,0 +1,52 @@
+---
+title: "LP-03-modeling.Rmd"
+author: "Daniel Loewenstein"
+date: "6/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(dplyr)
+```
+
+```{r wrappers}
+# Some convenience wrappers
+DERIVED_DATA <- function(...) here::here("analysis", "data", "derived_data", ...)
+RAW_DATA     <- function(...) here::here("analysis", "data", "raw_data", ...)
+```
+
+```{r}
+x_train <- readRDS(DERIVED_DATA("x_train.rds"))
+y_train <- readRDS(DERIVED_DATA("y_train.rds"))
+x_k     <- readRDS(DERIVED_DATA("knockoffs.rds"))
+```
+
+
+```{r}
+# Standardize data to match standardized knockoffs
+x_train <- scale(x_train, center = TRUE, scale = TRUE)
+# To numeric matrix
+x_k <- data.matrix(x_k)
+
+# From to true/false to factor 0, 1
+y_train <- factor(as.numeric(y_train))
+```
+
+```{r}
+W    <- stat.random_forest(x_train, x_k, y_train)
+W_l2 <- stat.glmnet_coefdiff(x_train, x_k, y_train, family = "binomial")
+W_s  <- stat.stability_selection(x_train, x_k, as.vector(y_train))
+
+tresh    <- knockoff.threshold(W, fdr=0.08, offset=1)
+tresh_l2 <- knockoff.threshold(W_l2, fdr = 0.6, offset = 1)
+tresh_s  <- knockoff.threshold(W_s, fdr = 0.05, offset = 1)
+
+colnames(x_train)[which(W >= tresh)]
+colnames(x_train)[which(W_l2 >= tresh_l2)]
+colnames(x_train)[which(W_s >= tresh_s)]
+```
